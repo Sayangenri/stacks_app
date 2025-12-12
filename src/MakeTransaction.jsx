@@ -5,88 +5,144 @@ import { userSession as legacyUserSession } from "./session";
 import useWallet from "./useWallet";
 
 export default function MakeTransaction() {
-  const { connected } = useWallet();
+  const { connected, request: walletRequest } = useWallet();
   const [recipient, setRecipient] = useState("");
-  const [amount, setAmount] = useState("100000"); // example microstacks or unit depends on API
+  const [amount, setAmount] = useState("100000"); // example microSTX (1 STX = 1_000_000)
   const [txLog, setTxLog] = useState([]);
+  const [loading, setLoading] = useState(false);
 
   function addTxLog(msg) {
-    setTxLog((s) => [new Date().toLocaleTimeString() + " — " + msg, ...s].slice(0, 10));
+    const ts = new Date().toLocaleTimeString();
+    setTxLog((s) => [`${ts} — ${msg}`, ...s].slice(0, 10));
+  }
+
+  // picks the best request function (prefers wallet-provided request via hook)
+  function getRequestFn() {
+    if (typeof walletRequest === "function") return walletRequest;
+    if (typeof StacksConnect.request === "function") return StacksConnect.request;
+    return null;
+  }
+
+  function extractTxId(resp) {
+    if (!resp) return null;
+    return resp.txId ?? resp.txid ?? resp.txID ?? resp?.tx?.tx_id ?? null;
   }
 
   async function sendTransaction() {
     if (!connected) {
-      alert("connect wallet first");
+      alert("Connect wallet first");
       return;
     }
     if (!recipient) {
-      alert("enter recipient");
+      alert("Enter recipient address");
+      return;
+    }
+    if (!amount || isNaN(Number(amount))) {
+      alert("Enter a valid numeric amount (microSTX). Example: 1000000 = 1 STX");
       return;
     }
 
-    // Preferred: new request() API
-    if (typeof StacksConnect.request === "function") {
-      try {
-        addTxLog("calling request('stx_transferStx')");
-        const res = await StacksConnect.request("stx_transferStx", {
-          amount: amount,
-          recipient,
-          memo: "Demo transfer",
-        });
-        addTxLog("request returned txid: " + (res?.txid || JSON.stringify(res)));
-        console.log("request('stx_transferStx') ->", res);
-        return;
-      } catch (e) {
-        addTxLog("request() error: " + (e.message || e));
-        console.error(e);
-      }
+    const requestFn = getRequestFn();
+    if (!requestFn) {
+      addTxLog("No request() function available in @stacks/connect or wallet hook.");
+      alert("No suitable connect/request API found. Check console.");
+      return;
     }
 
-    // Fallback: openSTXTransfer from older connect implementations
-    if (typeof StacksConnect.openSTXTransfer === "function") {
-      try {
-        addTxLog("calling openSTXTransfer (fallback)");
-        await StacksConnect.openSTXTransfer({
-          recipient,
-          amount,
-          memo: "Demo transfer",
-          userSession: legacyUserSession,
-          onFinish: (data) => {
-            addTxLog("openSTXTransfer onFinish: " + JSON.stringify(data || {}));
-            console.log("openSTXTransfer finished:", data);
-          },
-        });
-        return;
-      } catch (e) {
-        addTxLog("openSTXTransfer error: " + (e.message || e));
-        console.error(e);
-      }
-    }
+    setLoading(true);
+    addTxLog(`Starting transfer → ${amount} microSTX to ${recipient}`);
 
-    addTxLog("No suitable transfer API found in @stacks/connect");
-    alert("No suitable transfer API found. Check console.");
+    try {
+      // Primary flow: request('stx_transferStx')
+      const res = await requestFn("stx_transferStx", {
+        recipient,
+        amount: amount.toString(),
+        memo: "Demo transfer",
+      });
+
+      addTxLog("request returned: " + JSON.stringify(res));
+      console.log("stx_transferStx response:", res);
+
+      const txid = extractTxId(res);
+      if (txid) {
+        addTxLog("txid: " + txid);
+        const explorerUrl = `https://explorer.stacks.co/txid/${txid}`;
+        // open explorer in a new tab so user can follow confirmation
+        window.open(explorerUrl, "_blank");
+      } else {
+        addTxLog("No txid returned by request; check wallet UI or console for details.");
+        alert("Transaction submitted (no txid in response). Check wallet UI or console.");
+      }
+    } catch (err) {
+      // If user or wallet rejects, we still want helpful logs
+      const msg = err?.message ?? JSON.stringify(err) ?? String(err);
+      addTxLog("request() error: " + msg);
+      console.error("stx_transferStx error:", err);
+
+      // If the error looks like 'request not supported', fallback to legacy openSTXTransfer
+      if (typeof StacksConnect.openSTXTransfer === "function") {
+        addTxLog("Attempting fallback openSTXTransfer");
+        try {
+          await StacksConnect.openSTXTransfer({
+            recipient,
+            amount: amount.toString(),
+            memo: "Demo transfer",
+            userSession: legacyUserSession,
+            onFinish: (data) => {
+              addTxLog("openSTXTransfer onFinish: " + JSON.stringify(data || {}));
+              const txid = extractTxId(data);
+              if (txid) {
+                const url = `https://explorer.stacks.co/txid/${txid}`;
+                window.open(url, "_blank");
+              }
+            },
+          });
+        } catch (fallbackErr) {
+          const fm = fallbackErr?.message ?? JSON.stringify(fallbackErr) ?? String(fallbackErr);
+          addTxLog("openSTXTransfer error: " + fm);
+          console.error("openSTXTransfer error:", fallbackErr);
+          alert("Transaction failed or was cancelled: " + fm);
+        }
+      } else {
+        // No fallback available
+        alert("Transaction failed or was cancelled: " + msg);
+      }
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
-    <div style={{ border: "1px solid #ddd", padding: 16, width: 420 }}>
-      <h3>Send STX</h3>
+    <div style={{ border: "1px solid #ddd", padding: 16, width: 420, borderRadius: 8 }}>
+      <h3 style={{ marginTop: 0 }}>Send STX</h3>
 
       <div style={{ display: "grid", gap: 8 }}>
-        <input placeholder="recipient address" value={recipient} onChange={(e) => setRecipient(e.target.value)} />
-        <input placeholder="amount" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        <input
+          placeholder="recipient address (SP... or ST...)"
+          value={recipient}
+          onChange={(e) => setRecipient(e.target.value.trim())}
+        />
+        <input
+          placeholder="amount (microSTX — 1 STX = 1,000,000)"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value.trim())}
+        />
         <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={sendTransaction} disabled={!connected}>
-            Send
+          <button onClick={sendTransaction} disabled={!connected || loading}>
+            {loading ? "sending…" : "Send"}
           </button>
+          {!connected ? (
+            <div style={{ alignSelf: "center", color: "#666", fontSize: 13 }}>connect wallet to enable</div>
+          ) : null}
         </div>
       </div>
 
       <div style={{ marginTop: 12, fontSize: 12 }}>
         <div style={{ fontWeight: "bold" }}>Tx log</div>
-        <div style={{ maxHeight: 120, overflow: "auto", background: "#fafafa", padding: 8 }}>
+        <div style={{ maxHeight: 160, overflow: "auto", background: "#fafafa", padding: 8, borderRadius: 6 }}>
           {txLog.length === 0 ? <div style={{ color: "#777" }}>no transactions yet</div> : null}
           {txLog.map((t, i) => (
-            <div key={i} style={{ fontFamily: "monospace", fontSize: 12, marginBottom: 4 }}>
+            <div key={i} style={{ fontFamily: "monospace", fontSize: 12, marginBottom: 6 }}>
               {t}
             </div>
           ))}

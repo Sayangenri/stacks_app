@@ -1,7 +1,9 @@
+// src/App.jsx
 import React from "react";
 import ConnectWallet from "./ConnectWallet";
 import MakeTransaction from "./MakeTransaction";
 import useWallet from "./useWallet";
+import DeployContract from "./DeployContract";
 
 export default function App() {
   const { connected, address } = useWallet();
@@ -21,6 +23,11 @@ export default function App() {
       <div style={{ display: "flex", gap: 20, marginTop: 16 }}>
         <ConnectWallet />
         <MakeTransaction />
+      </div>
+
+      {/* NEW SECTION: Deploy + Call Combined Tool */}
+      <div style={{ marginTop: 32 }}>
+        <DeployContract />
       </div>
     </div>
   );
