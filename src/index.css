@@ -1,0 +1,19 @@
+body {
+  margin: 0;
+  padding: 0;
+  background: #fbfbfb;
+  color: #111;
+  font-family: system-ui, sans-serif;
+}
+
+button {
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #bbb;
+  background: white;
+  cursor: pointer;
+}
+
+button:hover {
+  filter: brightness(0.96);
+}
