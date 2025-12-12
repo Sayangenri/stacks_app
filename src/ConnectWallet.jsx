@@ -1,191 +1,154 @@
 // src/ConnectWallet.jsx
-import React, { useEffect, useState, useRef } from "react";
+import React, { useState } from "react";
 import * as StacksConnect from "@stacks/connect";
-import { appConfig, userSession } from "./session";
-
-/**
- * Robust ConnectWallet:
- * - detects various @stacks/connect exports
- * - polls after initiating connect to catch popup/redirect flows
- * - listens for window focus (helps when user approves in another window)
- * - displays resolved STX address after connect
- */
-
-function pickShowConnect() {
-  const candidates = ["showConnect", "connect", "request"];
-  for (const name of candidates) {
-    if (typeof StacksConnect[name] === "function") return StacksConnect[name];
-  }
-  if (StacksConnect.default && typeof StacksConnect.default.showConnect === "function")
-    return StacksConnect.default.showConnect;
-  if (typeof StacksConnect.default === "function") return StacksConnect.default;
-  return null;
-}
+import { userSession as legacyUserSession } from "./session";
+import useWallet from "./useWallet";
 
 export default function ConnectWallet() {
-  const [userData, setUserData] = useState(null);
-  const [error, setError] = useState(null);
-  const [isPending, setIsPending] = useState(userSession.isSignInPending?.() || false);
-  const pollRef = useRef(null);
+  const { connected, address, refresh } = useWallet();
+  const [log, setLog] = useState([]);
 
-  // load user data if already signed in
-  const refreshUserData = () => {
-    if (userSession.isUserSignedIn()) {
+  function addLog(...msgs) {
+    setLog((l) => [new Date().toLocaleTimeString() + " — " + msgs.join(" "), ...l].slice(0, 10));
+    console.debug(...msgs);
+  }
+
+  async function handleConnect() {
+    addLog("attempting connect()");
+    // prefer new API
+    if (typeof StacksConnect.connect === "function") {
       try {
-        const data = userSession.loadUserData();
-        setUserData(data);
-        setIsPending(false);
-        return true;
+        // if already connected, skip
+        if (typeof StacksConnect.isConnected === "function" && StacksConnect.isConnected()) {
+          addLog("already connected via isConnected()");
+          refresh();
+          return;
+        }
+        const res = await StacksConnect.connect();
+        addLog("connect() resolved", JSON.stringify(res || {}));
+        // after connect, read local storage helper (if present)
+        if (typeof StacksConnect.getLocalStorage === "function") {
+          const ls = StacksConnect.getLocalStorage();
+          addLog("getLocalStorage()", JSON.stringify(ls || {}));
+        }
+        refresh();
+        return;
       } catch (e) {
-        console.warn("refreshUserData: failed to load userData", e);
+        addLog("connect() threw:", e.message || e);
+        console.error(e);
       }
     }
-    return false;
-  };
 
-  useEffect(() => {
-    refreshUserData();
-
-    // if sign-in pending (redirect), show pending indicator
-    if (userSession.isSignInPending && userSession.isSignInPending()) {
-      setIsPending(true);
+    // try showConnect (older name)
+    if (typeof StacksConnect.showConnect === "function") {
+      try {
+        await StacksConnect.showConnect({
+          userSession: legacyUserSession,
+          appDetails: { name: "my-stacks-app", icon: window.location.origin + "/vite.svg" },
+          onFinish: () => {
+            addLog("showConnect onFinish");
+            refresh();
+          },
+        });
+        return;
+      } catch (e) {
+        addLog("showConnect threw:", e.message || e);
+        console.error(e);
+      }
     }
 
-    // listen for window focus (user may approve in wallet tab/popup)
-    const onFocus = () => {
-      if (userSession.isUserSignedIn()) {
-        refreshUserData();
+    // fallback: legacy userSession redirect / sign in pending - open auth UI via userSession
+    try {
+      addLog("FALLBACK: trying legacy userSession redirect");
+      // legacyUserSession.redirectToSignIn ? use that if available - but not all versions expose
+      if (legacyUserSession && typeof legacyUserSession.redirectToSignIn === "function") {
+        legacyUserSession.redirectToSignIn();
+        return;
       }
-    };
-    window.addEventListener("focus", onFocus);
+      addLog("No suitable connect API found. Check @stacks/connect version and wallet extension.");
+      alert("No suitable connect API found in @stacks/connect. Check console for details.");
+    } catch (e) {
+      addLog("Fallback failed:", e.message || e);
+      console.error(e);
+      alert("Connect failed — check console.");
+    }
+  }
 
-    return () => {
-      window.removeEventListener("focus", onFocus);
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
+  async function handleDisconnect() {
+    addLog("attempting disconnect");
+    if (typeof StacksConnect.disconnect === "function") {
+      try {
+        await StacksConnect.disconnect();
+        addLog("disconnect() done");
+        refresh();
+        return;
+      } catch (e) {
+        addLog("disconnect() error:", e.message || e);
+        console.error(e);
       }
-    };
-  }, []);
-
-  // helper to read a friendly address string
-  const getAddressString = (data) => {
-    if (!data) return null;
-    const profile = data.profile || {};
-    const stxAddress = profile.stxAddress;
-    if (!stxAddress) return null;
-    // common shapes: { mainnet: "...", testnet: "..." } or a string
-    if (typeof stxAddress === "string") return stxAddress;
-    if (stxAddress.testnet) return stxAddress.testnet;
-    if (stxAddress.mainnet) return stxAddress.mainnet;
+    }
     // fallback
-    return JSON.stringify(stxAddress);
-  };
-
-  // poll for sign-in (used after initiating connect)
-  const startPollingForSignIn = (timeoutMs = 10000, intervalMs = 500) => {
-    if (pollRef.current) clearInterval(pollRef.current);
-    const start = Date.now();
-    pollRef.current = setInterval(() => {
-      if (userSession.isUserSignedIn()) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-        refreshUserData();
-      } else if (Date.now() - start > timeoutMs) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
-        setIsPending(false);
-      }
-    }, intervalMs);
-  };
-
-  const handleConnect = () => {
-    setError(null);
-    const fn = pickShowConnect();
-    if (!fn) {
-      setError("No compatible connect function found. Check console for available exports.");
-      console.error("Available @stacks/connect exports:", Object.keys(StacksConnect));
-      return;
-    }
-
-    const opts = {
-      appDetails: {
-        name: "my-stacks-app",
-        icon: window.location.origin + "/logo.png",
-      },
-      userSession,
-      onFinish: () => {
-        // many implementations call onFinish; still poll to be safe
-        refreshUserData();
-      },
-    };
-
     try {
-      const maybePromise = fn(opts);
-      // start polling — covers popup/redirect flows that don't call onFinish in-app
-      setIsPending(true);
-      startPollingForSignIn(15000, 500);
+      legacyUserSession.signUserOut(window.location.origin);
+      addLog("legacy signUserOut done");
+      refresh();
+    } catch (e) {
+      addLog("sign out fallback failed:", e.message || e);
+    }
+  }
 
-      if (maybePromise && typeof maybePromise.then === "function") {
-        maybePromise
-          .then(() => {
-            // sometimes resolves immediately
-            if (userSession.isUserSignedIn()) refreshUserData();
-          })
-          .catch((e) => {
-            console.warn("connect promise rejected", e);
-            setError("connect flow failed (see console)");
-            setIsPending(false);
-          });
+  async function showLocalStorage() {
+    addLog("showLocalStorage()");
+    if (typeof StacksConnect.getLocalStorage === "function") {
+      try {
+        const ls = StacksConnect.getLocalStorage();
+        addLog("getLocalStorage ->", JSON.stringify(ls || {}));
+        console.log("localStorage object from @stacks/connect:", ls);
+      } catch (e) {
+        addLog("getLocalStorage error:", e.message || e);
       }
-    } catch (e) {
-      console.error("Error while invoking connect function:", e);
-      setError("failed to start connect (see console)");
-      setIsPending(false);
+    } else {
+      try {
+        const data = legacyUserSession.loadUserData();
+        addLog("legacy loadUserData ->", JSON.stringify(data || {}));
+        console.log("legacy userSession.loadUserData()", data);
+      } catch (e) {
+        addLog("legacy loadUserData error:", e.message || e);
+      }
     }
-  };
-
-  const handleSignOut = () => {
-    try {
-      userSession.signUserOut(window.location.origin);
-      setUserData(null);
-      setIsPending(false);
-    } catch (e) {
-      console.error("sign out failed:", e);
-      setError("sign out failed (see console)");
-    }
-  };
-
-  const address = getAddressString(userData);
+  }
 
   return (
-    <div style={{ border: "1px solid #ddd", padding: 16, borderRadius: 8, minWidth: 320 }}>
-      <h3>wallet</h3>
+    <div style={{ border: "1px solid #ddd", padding: 16, width: 420 }}>
+      <h3>Connect Wallet</h3>
 
-      <div style={{ marginBottom: 10 }}>
-        {isPending ? (
-          <span style={{ color: "#b47cff", fontWeight: "bold" }}>● sign-in pending…</span>
-        ) : address ? (
-          <span style={{ color: "green", fontWeight: "bold" }}>● wallet connected ✓</span>
-        ) : (
-          <span style={{ color: "red", fontWeight: "bold" }}>● wallet not connected ✗</span>
-        )}
+      <div style={{ marginBottom: 12 }}>
+        <div>
+          <strong>Status:</strong>{" "}
+          <span style={{ color: connected ? "green" : "red" }}>{connected ? "connected" : "not connected"}</span>
+        </div>
+        <div>
+          <strong>Address:</strong> {address || "—"}
+        </div>
       </div>
 
-      {error && <div style={{ color: "crimson", marginBottom: 8 }}>{error}</div>}
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+        <button onClick={handleConnect}>Connect</button>
+        <button onClick={handleDisconnect}>Disconnect</button>
+        <button onClick={showLocalStorage}>Show Local Data</button>
+      </div>
 
-      {address ? (
-        <>
-          <p><strong>address:</strong></p>
-          <pre style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{address}</pre>
-          <button onClick={handleSignOut}>sign out</button>
-        </>
-      ) : (
-        <>
-          <p>not connected</p>
-          <button onClick={handleConnect}>connect stacks wallet</button>
-        </>
-      )}
+      <div style={{ fontSize: 12, color: "#444" }}>
+        <div style={{ fontWeight: "bold", marginBottom: 6 }}>Debug log</div>
+        <div style={{ maxHeight: 120, overflow: "auto", background: "#fafafa", padding: 8 }}>
+          {log.length === 0 ? <div style={{ color: "#777" }}>no logs yet</div> : null}
+          {log.map((l, i) => (
+            <div key={i} style={{ fontFamily: "monospace", fontSize: 12, marginBottom: 4 }}>
+              {l}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

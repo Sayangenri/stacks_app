@@ -1,80 +1,97 @@
 // src/MakeTransaction.jsx
-import React from "react";
-import { openSTXTransfer } from "@stacks/connect";
-import * as StacksNetwork from "@stacks/network"; // import the module namespace
-import { userSession } from "./session";
-
-/**
- * This file picks the correct network object whether your @stacks/network version
- * exports a class named `StacksTestnet` (older style) or a constant `STACKS_TESTNET`
- * (newer style).
- *
- * Replace RECIPIENT below with a real testnet address when testing.
- */
-
-const RECIPIENT = "ST3NBRSFKX28FQ59FMFMVX3K7V4G3WZKB6TW8F7FP"; // replace as needed
-const AMOUNT = "1000"; // adjust units if your wallet interprets differently
-
-function getTestnetNetwork() {
-  // if the package exposes a class constructor StacksTestnet -> instantiate it
-  if (typeof StacksNetwork.StacksTestnet === "function") {
-    try {
-      return new StacksNetwork.StacksTestnet();
-    } catch (e) {
-      // fallback to next option below
-      console.warn("Failed to instantiate StacksTestnet(), falling back:", e);
-    }
-  }
-
-  // if the package exposes a constant STACKS_TESTNET (newer versions)
-  if (StacksNetwork.STACKS_TESTNET) {
-    return StacksNetwork.STACKS_TESTNET;
-  }
-
-  // last resort: try StacksMainnet named export typo guard (unlikely)
-  if (typeof StacksNetwork.StacksMainnet === "function") {
-    return new StacksNetwork.StacksMainnet(); // fallback to mainnet (not ideal)
-  }
-
-  throw new Error("Could not determine Stacks testnet object from @stacks/network");
-}
+import React, { useState } from "react";
+import * as StacksConnect from "@stacks/connect";
+import { userSession as legacyUserSession } from "./session";
+import useWallet from "./useWallet";
 
 export default function MakeTransaction() {
-  const handleTransfer = () => {
-    if (!userSession.isUserSignedIn()) {
-      alert("please connect wallet first");
+  const { connected } = useWallet();
+  const [recipient, setRecipient] = useState("");
+  const [amount, setAmount] = useState("100000"); // example microstacks or unit depends on API
+  const [txLog, setTxLog] = useState([]);
+
+  function addTxLog(msg) {
+    setTxLog((s) => [new Date().toLocaleTimeString() + " — " + msg, ...s].slice(0, 10));
+  }
+
+  async function sendTransaction() {
+    if (!connected) {
+      alert("connect wallet first");
+      return;
+    }
+    if (!recipient) {
+      alert("enter recipient");
       return;
     }
 
-    let network;
-    try {
-      network = getTestnetNetwork();
-    } catch (err) {
-      console.error(err);
-      alert("unable to resolve Stacks network object. check console for details.");
-      return;
+    // Preferred: new request() API
+    if (typeof StacksConnect.request === "function") {
+      try {
+        addTxLog("calling request('stx_transferStx')");
+        const res = await StacksConnect.request("stx_transferStx", {
+          amount: amount,
+          recipient,
+          memo: "Demo transfer",
+        });
+        addTxLog("request returned txid: " + (res?.txid || JSON.stringify(res)));
+        console.log("request('stx_transferStx') ->", res);
+        return;
+      } catch (e) {
+        addTxLog("request() error: " + (e.message || e));
+        console.error(e);
+      }
     }
 
-    openSTXTransfer({
-      recipient: RECIPIENT,
-      amount: AMOUNT,
-      memo: "test transfer from my-stacks-app",
-      network,
-      onFinish: (data) => {
-        console.log("transfer finished:", data);
-        alert("transfer flow finished — check console for details");
-      },
-      onCancel: () => {
-        console.log("transfer cancelled");
-      },
-    });
-  };
+    // Fallback: openSTXTransfer from older connect implementations
+    if (typeof StacksConnect.openSTXTransfer === "function") {
+      try {
+        addTxLog("calling openSTXTransfer (fallback)");
+        await StacksConnect.openSTXTransfer({
+          recipient,
+          amount,
+          memo: "Demo transfer",
+          userSession: legacyUserSession,
+          onFinish: (data) => {
+            addTxLog("openSTXTransfer onFinish: " + JSON.stringify(data || {}));
+            console.log("openSTXTransfer finished:", data);
+          },
+        });
+        return;
+      } catch (e) {
+        addTxLog("openSTXTransfer error: " + (e.message || e));
+        console.error(e);
+      }
+    }
+
+    addTxLog("No suitable transfer API found in @stacks/connect");
+    alert("No suitable transfer API found. Check console.");
+  }
 
   return (
-    <div style={{ border: "1px solid #ddd", padding: 16, borderRadius: 8, minWidth: 320 }}>
-      <h3>send stx</h3>
-      <p>opens the wallet transfer popup (testnet).</p>
-      <button onClick={handleTransfer}>open transfer popup</button>
+    <div style={{ border: "1px solid #ddd", padding: 16, width: 420 }}>
+      <h3>Send STX</h3>
+
+      <div style={{ display: "grid", gap: 8 }}>
+        <input placeholder="recipient address" value={recipient} onChange={(e) => setRecipient(e.target.value)} />
+        <input placeholder="amount" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={sendTransaction} disabled={!connected}>
+            Send
+          </button>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 12, fontSize: 12 }}>
+        <div style={{ fontWeight: "bold" }}>Tx log</div>
+        <div style={{ maxHeight: 120, overflow: "auto", background: "#fafafa", padding: 8 }}>
+          {txLog.length === 0 ? <div style={{ color: "#777" }}>no transactions yet</div> : null}
+          {txLog.map((t, i) => (
+            <div key={i} style={{ fontFamily: "monospace", fontSize: 12, marginBottom: 4 }}>
+              {t}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

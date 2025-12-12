@@ -1,32 +1,27 @@
-import { useEffect } from "react";
-import { userSession } from "./session";
+import React from "react";
+import ConnectWallet from "./ConnectWallet";
+import MakeTransaction from "./MakeTransaction";
+import useWallet from "./useWallet";
 
-export default function AppRoot() {
-  useEffect(() => {
-    async function handleAuth() {
-      if (userSession.isSignInPending()) {
-        const data = await userSession.handlePendingSignIn();
-        console.log("auth completed", data);
-      }
-    }
-    handleAuth();
-  }, []);
+export default function App() {
+  const { connected, address } = useWallet();
+
   return (
-    <div style={{ padding: 32 }}>
-      <h1>Stacks App</h1>
+    <div style={{ padding: 24, fontFamily: "system-ui, sans-serif" }}>
+      <h1>stacks connect demo</h1>
 
       <p>
-        Wallet Status:{" "}
-        {connected ? (
-          <span style={{ color: "green" }}>Connected</span>
-        ) : (
-          <span style={{ color: "red" }}>Not Connected</span>
-        )}
+        status:{" "}
+        <strong style={{ color: connected ? "green" : "red" }}>
+          {connected ? "connected" : "not connected"}
+        </strong>
+        {address ? <span> — {address}</span> : null}
       </p>
 
-      <ConnectWallet />
-      <br />
-      <MakeTransaction />
+      <div style={{ display: "flex", gap: 20, marginTop: 16 }}>
+        <ConnectWallet />
+        <MakeTransaction />
+      </div>
     </div>
   );
 }
