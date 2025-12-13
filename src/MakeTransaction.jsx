@@ -1,13 +1,17 @@
-// src/MakeTransaction.jsx
 import React, { useState } from "react";
 import * as StacksConnect from "@stacks/connect";
 import { userSession as legacyUserSession } from "./session";
 import useWallet from "./useWallet";
+import Card from "./components/Card";
+import Button from "./components/Button";
+import Input from "./components/Input";
+import LogViewer from "./components/LogViewer";
+import { Send, Loader2 } from "lucide-react";
 
 export default function MakeTransaction() {
   const { connected, request: walletRequest } = useWallet();
   const [recipient, setRecipient] = useState("");
-  const [amount, setAmount] = useState("100000"); // example microSTX (1 STX = 1_000_000)
+  const [amount, setAmount] = useState("100000");
   const [txLog, setTxLog] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -16,7 +20,6 @@ export default function MakeTransaction() {
     setTxLog((s) => [`${ts} — ${msg}`, ...s].slice(0, 10));
   }
 
-  // picks the best request function (prefers wallet-provided request via hook)
   function getRequestFn() {
     if (typeof walletRequest === "function") return walletRequest;
     if (typeof StacksConnect.request === "function") return StacksConnect.request;
@@ -50,104 +53,81 @@ export default function MakeTransaction() {
     }
 
     setLoading(true);
-    addTxLog(`Starting transfer → ${amount} microSTX to ${recipient}`);
+    addTxLog("Preparing STX transfer...");
 
     try {
-      // Primary flow: request('stx_transferStx')
-      const res = await requestFn("stx_transferStx", {
-        recipient,
-        amount: amount.toString(),
-        memo: "Demo transfer",
-      });
+      const txOptions = {
+        stxAddress: recipient,
+        amount: amount,
+        network: "testnet",
+      };
 
-      addTxLog("request returned: " + JSON.stringify(res));
-      console.log("stx_transferStx response:", res);
+      addTxLog(`Requesting transfer of ${amount} microSTX to ${recipient}`);
+      const resp = await requestFn("stx_transferStx", txOptions);
+      addTxLog("Transfer request sent. Response: " + JSON.stringify(resp));
 
-      const txid = extractTxId(res);
-      if (txid) {
-        addTxLog("txid: " + txid);
-        const explorerUrl = `https://explorer.stacks.co/txid/${txid}`;
-        // open explorer in a new tab so user can follow confirmation
-        window.open(explorerUrl, "_blank");
+      const txId = extractTxId(resp);
+      if (txId) {
+        addTxLog(`Transaction ID: ${txId}`);
+        console.log("Transaction ID:", txId);
       } else {
-        addTxLog("No txid returned by request; check wallet UI or console for details.");
-        alert("Transaction submitted (no txid in response). Check wallet UI or console.");
+        addTxLog("No txId found in response. Check console for full response.");
+        console.warn("No txId in response:", resp);
       }
     } catch (err) {
-      // If user or wallet rejects, we still want helpful logs
-      const msg = err?.message ?? JSON.stringify(err) ?? String(err);
-      addTxLog("request() error: " + msg);
-      console.error("stx_transferStx error:", err);
-
-      // If the error looks like 'request not supported', fallback to legacy openSTXTransfer
-      if (typeof StacksConnect.openSTXTransfer === "function") {
-        addTxLog("Attempting fallback openSTXTransfer");
-        try {
-          await StacksConnect.openSTXTransfer({
-            recipient,
-            amount: amount.toString(),
-            memo: "Demo transfer",
-            userSession: legacyUserSession,
-            onFinish: (data) => {
-              addTxLog("openSTXTransfer onFinish: " + JSON.stringify(data || {}));
-              const txid = extractTxId(data);
-              if (txid) {
-                const url = `https://explorer.stacks.co/txid/${txid}`;
-                window.open(url, "_blank");
-              }
-            },
-          });
-        } catch (fallbackErr) {
-          const fm = fallbackErr?.message ?? JSON.stringify(fallbackErr) ?? String(fallbackErr);
-          addTxLog("openSTXTransfer error: " + fm);
-          console.error("openSTXTransfer error:", fallbackErr);
-          alert("Transaction failed or was cancelled: " + fm);
-        }
-      } else {
-        // No fallback available
-        alert("Transaction failed or was cancelled: " + msg);
-      }
+      addTxLog("Transfer error: " + (err.message || err));
+      console.error("Transfer error:", err);
+      alert("Transfer failed. Check console for details.");
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div style={{ border: "1px solid #ddd", padding: 16, width: 420, borderRadius: 8 }}>
-      <h3 style={{ marginTop: 0 }}>Send STX</h3>
-
-      <div style={{ display: "grid", gap: 8 }}>
-        <input
-          placeholder="recipient address (SP... or ST...)"
+    <Card title="Send Transaction" icon={<Send size={20} />}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+        <Input
+          label="Recipient Address"
+          placeholder="SP2J6ZY48GV1EZ5V2V5RB9MP66SW86PYKKNRV9EJ7"
           value={recipient}
-          onChange={(e) => setRecipient(e.target.value.trim())}
+          onChange={(e) => setRecipient(e.target.value)}
+          disabled={loading}
         />
-        <input
-          placeholder="amount (microSTX — 1 STX = 1,000,000)"
+
+        <Input
+          label="Amount (microSTX)"
+          type="number"
+          placeholder="1000000"
           value={amount}
-          onChange={(e) => setAmount(e.target.value.trim())}
+          onChange={(e) => setAmount(e.target.value)}
+          disabled={loading}
         />
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={sendTransaction} disabled={!connected || loading}>
-            {loading ? "sending…" : "Send"}
-          </button>
-          {!connected ? (
-            <div style={{ alignSelf: "center", color: "#666", fontSize: 13 }}>connect wallet to enable</div>
-          ) : null}
+
+        <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-tertiary)' }}>
+          💡 1 STX = 1,000,000 microSTX
         </div>
+
+        <Button
+          variant="primary"
+          icon={loading ? <Loader2 size={18} className="spin" /> : <Send size={18} />}
+          onClick={sendTransaction}
+          disabled={!connected || loading}
+        >
+          {loading ? 'Sending...' : 'Send STX'}
+        </Button>
+
+        <LogViewer logs={txLog} title="Transaction Activity" />
       </div>
 
-      <div style={{ marginTop: 12, fontSize: 12 }}>
-        <div style={{ fontWeight: "bold" }}>Tx log</div>
-        <div style={{ maxHeight: 160, overflow: "auto", background: "#fafafa", padding: 8, borderRadius: 6 }}>
-          {txLog.length === 0 ? <div style={{ color: "#777" }}>no transactions yet</div> : null}
-          {txLog.map((t, i) => (
-            <div key={i} style={{ fontFamily: "monospace", fontSize: 12, marginBottom: 6 }}>
-              {t}
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
+      <style>{`
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        .spin {
+          animation: spin 1s linear infinite;
+        }
+      `}</style>
+    </Card>
   );
 }

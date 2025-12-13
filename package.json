@@ -13,6 +13,7 @@
     "@stacks/connect": "^8.2.3",
     "@stacks/network": "^7.2.0",
     "@stacks/transactions": "^7.3.0",
+    "lucide-react": "^0.561.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },

@@ -1,8 +1,12 @@
-// src/ConnectWallet.jsx
 import React, { useState } from "react";
 import * as StacksConnect from "@stacks/connect";
 import { userSession as legacyUserSession } from "./session";
 import useWallet from "./useWallet";
+import Card from "./components/Card";
+import Button from "./components/Button";
+import StatusBadge from "./components/StatusBadge";
+import LogViewer from "./components/LogViewer";
+import { Wallet, Power, Eye } from "lucide-react";
 
 export default function ConnectWallet() {
   const { connected, address, refresh } = useWallet();
@@ -15,10 +19,8 @@ export default function ConnectWallet() {
 
   async function handleConnect() {
     addLog("attempting connect()");
-    // prefer new API
     if (typeof StacksConnect.connect === "function") {
       try {
-        // if already connected, skip
         if (typeof StacksConnect.isConnected === "function" && StacksConnect.isConnected()) {
           addLog("already connected via isConnected()");
           refresh();
@@ -26,7 +28,6 @@ export default function ConnectWallet() {
         }
         const res = await StacksConnect.connect();
         addLog("connect() resolved", JSON.stringify(res || {}));
-        // after connect, read local storage helper (if present)
         if (typeof StacksConnect.getLocalStorage === "function") {
           const ls = StacksConnect.getLocalStorage();
           addLog("getLocalStorage()", JSON.stringify(ls || {}));
@@ -39,7 +40,6 @@ export default function ConnectWallet() {
       }
     }
 
-    // try showConnect (older name)
     if (typeof StacksConnect.showConnect === "function") {
       try {
         await StacksConnect.showConnect({
@@ -57,10 +57,8 @@ export default function ConnectWallet() {
       }
     }
 
-    // fallback: legacy userSession redirect / sign in pending - open auth UI via userSession
     try {
       addLog("FALLBACK: trying legacy userSession redirect");
-      // legacyUserSession.redirectToSignIn ? use that if available - but not all versions expose
       if (legacyUserSession && typeof legacyUserSession.redirectToSignIn === "function") {
         legacyUserSession.redirectToSignIn();
         return;
@@ -87,7 +85,6 @@ export default function ConnectWallet() {
         console.error(e);
       }
     }
-    // fallback
     try {
       legacyUserSession.signUserOut(window.location.origin);
       addLog("legacy signUserOut done");
@@ -119,36 +116,59 @@ export default function ConnectWallet() {
   }
 
   return (
-    <div style={{ border: "1px solid #ddd", padding: 16, width: 420 }}>
-      <h3>Connect Wallet</h3>
-
-      <div style={{ marginBottom: 12 }}>
-        <div>
-          <strong>Status:</strong>{" "}
-          <span style={{ color: connected ? "green" : "red" }}>{connected ? "connected" : "not connected"}</span>
-        </div>
-        <div>
-          <strong>Address:</strong> {address || "—"}
-        </div>
-      </div>
-
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <button onClick={handleConnect}>Connect</button>
-        <button onClick={handleDisconnect}>Disconnect</button>
-        <button onClick={showLocalStorage}>Show Local Data</button>
-      </div>
-
-      <div style={{ fontSize: 12, color: "#444" }}>
-        <div style={{ fontWeight: "bold", marginBottom: 6 }}>Debug log</div>
-        <div style={{ maxHeight: 120, overflow: "auto", background: "#fafafa", padding: 8 }}>
-          {log.length === 0 ? <div style={{ color: "#777" }}>no logs yet</div> : null}
-          {log.map((l, i) => (
-            <div key={i} style={{ fontFamily: "monospace", fontSize: 12, marginBottom: 4 }}>
-              {l}
+    <Card title="Wallet Connection" icon={<Wallet size={20} />}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span className="body-small text-secondary">Status</span>
+            <StatusBadge status={connected ? 'connected' : 'disconnected'}>
+              {connected ? 'Connected' : 'Disconnected'}
+            </StatusBadge>
+          </div>
+          
+          {address && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)' }}>
+              <span className="body-small text-secondary">Wallet Address</span>
+              <code className="text-mono" style={{ 
+                padding: 'var(--space-3)', 
+                background: 'rgba(0, 0, 0, 0.2)',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--color-border)',
+                wordBreak: 'break-all',
+                fontSize: 'var(--text-xs)'
+              }}>
+                {address}
+              </code>
             </div>
-          ))}
+          )}
         </div>
+
+        <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+          <Button 
+            variant="primary" 
+            icon={<Wallet size={18} />}
+            onClick={handleConnect}
+          >
+            Connect
+          </Button>
+          <Button 
+            variant="secondary" 
+            icon={<Power size={18} />}
+            onClick={handleDisconnect}
+          >
+            Disconnect
+          </Button>
+          <Button 
+            variant="ghost" 
+            icon={<Eye size={18} />}
+            onClick={showLocalStorage}
+          >
+            Inspect
+          </Button>
+        </div>
+
+        <LogViewer logs={log} title="Connection Activity" />
       </div>
-    </div>
+    </Card>
   );
 }

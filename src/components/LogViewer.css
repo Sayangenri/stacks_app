@@ -1,0 +1,43 @@
+.log-viewer {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.log-header {
+  padding: var(--space-3) var(--space-4);
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.log-content {
+  max-height: 180px;
+  overflow-y: auto;
+  padding: var(--space-3);
+}
+
+.log-empty {
+  text-align: center;
+  padding: var(--space-6);
+}
+
+.log-entry {
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-2);
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: var(--radius-sm);
+  border-left: 2px solid var(--color-primary);
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  transition: all var(--transition-fast);
+}
+
+.log-entry:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-left-color: var(--color-primary-light);
+}
+
+.log-entry:last-child {
+  margin-bottom: 0;
+}
